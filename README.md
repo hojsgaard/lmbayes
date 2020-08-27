@@ -1,0 +1,2 @@
+# lmbayes
+Bayesian linear model
