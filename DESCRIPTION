@@ -1,0 +1,19 @@
+Package: lmbayes
+Type: Package
+Title: Conjugate update in linear normal model
+Version: 1.0
+Date: 2020-08-17
+Author: Søren Højsgaard <sorenh@math.aau.dk>
+Maintainer: Søren Højsgaard <sorenh@math.aau.dk>
+Description: Conjugate update in linear normal model. 
+Depends:
+  MASS
+Suggests:
+  ggplot2
+Encoding: UTF-8
+ZipData: no
+License: GPL (>= 2)
+ByteCompile: Yes
+RoxygenNote: 7.1.1
+LazyData: true
+
