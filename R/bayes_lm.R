@@ -51,9 +51,9 @@ bayes_lm <- function(formula, data, m, C, phi){
     
     Ey <- as.numeric(X %*% m)
     
-    m2 <- as.numeric(m + (Cby %*% solve(Cyy)) %*% (yy - Ey))
-    C2 <- C - (Cby %*% solve(Cyy) %*% Cyb)
-
+    m2 <- as.numeric(m + Cby %*% solve(Cyy, (yy - Ey)))
+    C2 <- C - Cby %*% solve(Cyy, Cyb)
+    
     out <- list(formula=formula, m=m2, C=C2, phi=phi, W=W, X=X)
     class(out) <- "blm"
     out
@@ -70,7 +70,7 @@ coef.blm <- function(object, ...){
 
 #' @export
 vcov.blm <- function(object, ...){
-    object$V
+    object$C
 }
 
 #' @export
