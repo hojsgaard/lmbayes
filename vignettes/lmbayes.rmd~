@@ -53,7 +53,7 @@ lm1 |> sigma()
 lm1 |> vcov()
 
 prior <- list(m=c(1000, 0), C=diag(500, 2), sd=100)
-fit2 <- bayes_lm(form, data=dat2, prior=prior)
+fit2 <- lmb(form, data=dat2, prior=prior)
 fit2
 
 fit2 |> coef()
@@ -68,8 +68,8 @@ lm1 |> vcov()
 lm1 |> sigma()
 lm1 |> tidy()
 
-fit3 <- bayes_lm(form, data=dat3, prior=fit2$posterior)
-fit4 <- bayes_lm(form, data=dat4, prior=fit2$prior)
+fit3 <- lmb(form, data=dat3, prior=fit2$posterior)
+fit4 <- lmb(form, data=dat4, prior=fit2$prior)
 
 fit2 |> coef()
 fit3 |> coef()
@@ -105,7 +105,7 @@ tt.vec <- seq(5, 85, by=10)
 plist  <- NULL
 for (tt in tt.vec){
     dat2_ <- dat |> filter(tvar < tt)
-    fit_  <- bayes_lm(form, data=dat2_, prior=prior)
+    fit_  <- lmb(form, data=dat2_, prior=prior)
     dat_  <- cbind(dat, predint(fit_, newdata=dat))
     pl <- dat_ |> ggplot(aes(tvar, y)) +
         geom_point() +
@@ -120,7 +120,3 @@ for (tt in tt.vec){
 plot_grid(plotlist = plist)
 ```
 
-
-<!-- ```{r} -->
-<!-- mean(diag(sigma(fit2)^2 * diag(1, nrow(X)) - X %*% fit2$posterior$C %*% t(X))) -->
-<!-- ``` -->
