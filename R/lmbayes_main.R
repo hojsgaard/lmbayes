@@ -81,8 +81,6 @@ lm2prior <- function(lm1, scale=1){
 #'  sd = 15                   # prior residual sd (not used here)
 #')
 #'
-#' # Fit Bayesian linear model with shrinkage (alpha = 0.4)
-#'
 #' # OLS
 #' fit0 <- lmb(dist ~ speed, data = cars)
 #'
