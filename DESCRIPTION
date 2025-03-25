@@ -7,11 +7,11 @@ Author: Søren Højsgaard <sorenh@math.aau.dk>
 Maintainer: Søren Højsgaard <sorenh@math.aau.dk>
 Description: Conjugate update in linear normal model. 
 Depends:
-  MASS,
   broom
 Suggests:
   cowplot,
   dplyr,
+  MASS,
   ggplot2,
   knitr,
   markdown

@@ -2,43 +2,74 @@
 % Please edit documentation in R/lmbayes_main.R
 \name{lmb}
 \alias{lmb}
-\title{Conjugate update in Bayesian linear model}
+\title{Linear Model with Empirical Bayes Shrinkage}
 \usage{
-lmb(formula., data., prior, update.sd = TRUE)
+lmb(formula., data., prior = NULL, alpha = 0, update.sd = TRUE)
 }
 \arguments{
-\item{formula.}{A formula}
+\item{formula.}{A formula specifying the linear model (e.g., \code{y ~ x + I(x^2)}).}
 
-\item{data.}{A dataframe}
+\item{data.}{A data frame containing the variables in the model.}
 
-\item{prior}{named list m (Mean in prior distribution of beta), C (Variance in prior distribution of beta), sd (Conditional variance of y given beta is sd I)}
+\item{prior}{A list containing prior information with components:
+\describe{
+\item{\code{m}}{Numeric vector of prior means for the regression coefficients.}
+\item{\code{C}}{Prior covariance matrix (not currently used in simple shrinkage).}
+\item{\code{sd}}{(Optional) Prior residual standard deviation (can be used for scaling/shrinkage).}
+}
+If \code{prior} is \code{NULL}, the function fits a standard OLS model.}
 
-\item{update.sd}{Should conditional variance be updated (emperical Bayes)}
+\item{alpha}{A numeric value in \code{[0, 1]} controlling shrinkage:
+\describe{
+\item{\code{alpha = 0}}{Full reliance on data (pure OLS).}
+\item{\code{alpha = 1}}{Full reliance on prior (ignore data).}
+\item{\code{0 < alpha < 1}}{Convex combination of prior mean and OLS estimate.}
+}}
+
+\item{update.sd}{Logical. If \code{TRUE}, estimate the residual standard deviation from the data.}
 }
 \value{
-An object of class 'blm'
+An object of class \code{\"lmb_class\"}, which is a list with the following components:
+\describe{
+\item{\code{call}}{The matched function call.}
+\item{\code{formula}}{The model formula used.}
+\item{\code{prior}}{The prior provided (or \code{NULL} if none).}
+\item{\code{posterior}}{A list with posterior components:}
+\describe{
+\item{\code{m}}{Posterior mean vector of regression coefficients.}
+\item{\code{C}}{Posterior covariance matrix (may be placeholder if not computed).}
+\item{\code{sd}}{Posterior residual standard deviation (from OLS if \code{update.sd = TRUE}).}
+}
+\item{\code{X}}{The design matrix used in the model.}
+\item{\code{data}}{The data used to fit the model.}
+}
 }
 \description{
-Conjugate update in Bayesian linear model
+Fits a linear regression model with optional shrinkage toward a prior mean, using empirical Bayes logic.
+If no prior is provided, the function defaults to standard OLS via \code{lm()}.
 }
 \examples{
-form <- dist ~ speed + I(speed^2)
-mm <- lm(form, data=cars)
-coef(summary(mm))
-sigma(mm)
+## Example: Bayesian shrinkage using the built-in 'cars' dataset
+data(cars)
 
-bb <- lmb(form, data=cars, prior=list(m=c(1, 1, 1), C=diag(10,3), sd=2))
-bb
+# A pretend prior: intercept = 0, slope = 3, with some vague prior sd
+prior <- list(
+ m = c(0, 3),              # prior mean: intercept = 0, slope = 3
+ C = diag(c(100, 10)),     # vague prior covariance (not used in this shrinkage)
+ sd = 15                   # prior residual sd (not used here)
+)
 
-coef(bb)
-sigma(bb)
+# OLS
+fit0 <- lmb(dist ~ speed, data = cars)
 
-if (require(ggplot2)){
-pp <- qplot(speed, dist, data=cars)
-pp + geom_line(aes(x=speed, y=predict(bb)), col="red") +
-     geom_line(aes(x=speed, y=predict(mm)), col="blue")
-}
-}
-\author{
-Søren Højsgaard
+# Bayesian
+fit1 <- lmb(dist ~ speed, data = cars, prior = prior)
+
+# Shrinkage combination of prior and OLS
+fit2 <- lmb(dist ~ speed, data = cars, prior = prior, alpha = 0.4)
+
+# Posterior coefficients
+fit0$posterior ## Nothing
+fit1$posterior
+fit2$posterior
 }

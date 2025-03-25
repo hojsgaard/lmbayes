@@ -114,8 +114,7 @@ lmb <- function(formula., data., prior=NULL, alpha=0, update.sd=TRUE){
     if (alpha > 0) {
         m  <- prior$m
         m2 <- alpha * m + (1-alpha) * beta.ols
-        C2 <- NULL
-        sd2 <- NULL
+        posterior <- list(m=m2)        
     } else {            
         m  <- prior$m
         C  <- prior$C 
@@ -155,11 +154,12 @@ lmb <- function(formula., data., prior=NULL, alpha=0, update.sd=TRUE){
         } else {
             sd2 <- sd
         }
+        posterior <- list(m=m2,  C=C2,  sd=sd2)        
     }
     
     out <- list(call=cl, formula=formula.,
                 prior     = prior,
-                posterior = list(m=m2,  C=C2,  sd=sd2),
+                posterior = posterior,
                 X=X, data=data.)
     
     class(out) <- "lmb_class"
