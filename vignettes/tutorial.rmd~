@@ -1,0 +1,301 @@
+---
+title: "Tutorial for lmbayes"
+author: "Søren Højsgaard"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteEngine{knitr::knitr}
+  %\VignetteIndexEntry{Tutorial for lmbayes}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options("digits"=3)
+```
+
+
+```{r}
+library(lmbayes)
+library(broom)
+library(cowplot)
+library(ggplot2)
+library(dplyr)
+library(doBy)
+library(tidyr)
+```
+
+
+```{r, echo=FALSE}
+test_correlation_significance <- function(cor_mat, n) {
+  if (!is.matrix(cor_mat)) stop("Input must be a correlation matrix.")
+  if (n <= 2) stop("Sample size must be greater than 2.")
+  
+  p_mat <- matrix(NA, nrow = nrow(cor_mat), ncol = ncol(cor_mat))
+  rownames(p_mat) <- rownames(cor_mat)
+  colnames(p_mat) <- colnames(cor_mat)
+
+  for (i in 1:(nrow(cor_mat)-1)) {
+    for (j in (i+1):ncol(cor_mat)) {
+      r <- cor_mat[i, j]
+      if (i == j) {
+        p_mat[i, j] <- NA
+      } else {
+        tval <- abs(r) * sqrt((n - 2) / (1 - r^2))
+        pval <- 2 * pt(-tval, df = n - 2)
+        p_mat[i, j] <- 2 * pval
+        p_mat[j, i] <- tval
+      }
+    }
+  }
+
+  return(p_mat)
+}
+```
+
+
+# Introduction
+
+This tutorial demonstrates how to use the `lmbayes` package to perform empirical Bayes estimation in a time-series regression setting. We will use the `child_growth` dataset from the `doBy` package, which contains longitudinal height measurements for children.
+
+# Load Data and Visualize
+
+We start by loading the data and visualizing the growth trajectories
+
+```{r}
+dat <- doBy::child_growth
+dat |> ggplot(aes(age,height, group=subject, color=subject)) + 
+  geom_line() + facet_grid(~gender) + theme_minimal() +
+  theme(legend.position = "none")
+```
+
+We will focus on the boys for this tutorial. 
+
+1. For the first 10 boys we will fit a quadratic model to the height data. 
+
+1. We will then use the regression coefficients to estimate a prior distribution for the coefficients. 
+
+1. We will then use this prior to combine with the likelihood for another boy for which we only have early data.
+
+
+# Fit Quadratic Models to Training Data
+
+```{r}
+bb  <- dat |> filter(gender=="boy")
+sub <- bb$subject |> unique()
+train <- bb |> filter(subject %in% sub[1:10])
+
+fit.list <- train |> lm_by(height ~ age + I(age^2) |subject, data=_)
+coef.df <- fit.list |> coef()
+coef.df
+sd <- fit.list |> sigma() |> mean()
+m  <- colMeans(coef.df)
+C  <- cov(coef.df)
+pr0 <- list(m=m, C=C, sd=sd)
+pr0
+```
+
+
+```{r}
+test_correlation_significance(cor(coef.df), nrow(coef.df))
+```
+
+
+We assume the model:
+
+$$
+y_i(t) = \beta_0 + \beta_1 t + \beta_2 t^2 + \varepsilon_i
+$$
+
+for each child $i$.
+
+
+## There is a new kid in town
+
+```{r}
+this  <- bb |> filter(subject %in% sub[11])
+this |>
+    ggplot(aes(age,height, group=subject, color=subject)) + geom_line() 
+```
+
+If we know data for the first, say 5 years, how well can we predict the height for the next years?
+
+```{r}
+tt <- 5
+this.early <- this |> filter(age <= tt)
+```
+
+
+## Bayesian Linear Regression: Joint and Conditional Distributions
+
+We assume the following model:
+
+- The prior on the regression coefficients is  
+  $$
+  b \sim \mathcal{N}(m, C)
+  $$
+  where $m$ is a $p$-dimensional mean vector and $C$ is a $p \times p$ covariance matrix.
+
+- The observation model is  
+  $$
+  y \mid b \sim \mathcal{N}(Xb, \sigma^2 I)
+  $$
+  where $X$ is an $n \times p$ design matrix, $y$ is an $n$-dimensional response vector, and $\sigma^2$ is the residual variance.
+
+---
+
+### Marginal Distribution of $y$
+
+By integrating out $b$, the marginal distribution of $y$ is:
+$$
+y \sim \mathcal{N}(X m, X C X^T + \sigma^2 I)
+$$
+
+---
+
+### Joint Distribution of $(y, b)$
+
+The joint distribution of $y$ and $b$ is multivariate normal:
+$$
+\begin{pmatrix}
+b \\\\
+y
+\end{pmatrix}
+\sim \mathcal{N} \left(
+\begin{pmatrix}
+m \\\\
+X m
+\end{pmatrix},
+\begin{pmatrix}
+C & C X^T \\\\
+X C & X C X^T + \sigma^2 I
+\end{pmatrix}
+\right)
+$$
+
+---
+
+### Conditional Distribution of $b \mid y$
+
+From the properties of the multivariate normal, the conditional distribution of $b$ given $y$ is:
+$$
+b \mid y \sim \mathcal{N}(m^*, C^*)
+$$
+where:
+$$
+m^* = m + C X^T (X C X^T + \sigma^2 I)^{-1} (y - X m)
+$$
+$$
+C^* = C - C X^T (X C X^T + \sigma^2 I)^{-1} X C
+$$
+
+---
+
+### Interpretation via $\Lambda$
+
+Let
+$$
+\Lambda = C X^T (X C X^T + \sigma^2 I)^{-1}
+$$
+so that the posterior mean becomes:
+$$
+m^* = m + \Lambda (y - X m)
+$$
+
+This form reveals how the prior is updated in the direction of the observed data, scaled by $\Lambda$ — the influence of the data increases as $\sigma^2$ decreases or $C$ becomes less informative.
+
+---
+
+### Optional Convex Combination (Heuristic)
+
+In some cases, when $C = \tau^2 I$ and $X^T X$ is well-conditioned, the posterior mean can be approximated as a convex combination:
+$$
+m^* \approx \alpha \cdot m + (1 - \alpha) \cdot \hat{b}_{\text{OLS}}
+$$
+where $\hat{b}_{\text{OLS}} = (X^T X)^{-1} X^T y$, and the shrinkage factor $\alpha$ depends on the relative strength of the prior and the data.
+
+This expression helps illustrate the idea that Bayesian estimation **shrinks** the data-driven estimate toward the prior mean.
+
+
+
+
+
+
+There are different options with the lmbayes package:
+
+Use the prior from above for fitting the model to the early data:
+
+```{r}
+lmb1 <- lmb(height ~ age + I(age^2), data=this.early, prior=pr0)
+lmb1
+lmb1$prior
+lmb1$posterior
+```
+
+Notice that sd changes from the prior to the posterior although we have not specified a prior for sd. The updated sd is based on the residual sum of squares. Setting update.sd=FALSE means that sd is not updated.
+
+
+We can make a cheaper update of $m$ as a convex combination of the prior mean and the OLS estimate of the early data. This is done by setting alpha to a value between 0 and 1. The update is then
+
+$$
+\tilde{m}  =  \alpha \cdot m + (1 - \alpha) \cdot \hat{\beta}_{ols}
+$$
+
+This gives no posterior variance matrix, but only the "posterior" mean. As such the prior need only the mean m.
+
+```{r}
+lmb2 <- lmb(height ~ age + I(age^2), data=this.early, prior=list(m=m), alpha=0.4)
+lmb2
+lmb2$prior
+lmb2$posterior
+```
+
+For benchmarking we can fit a model to all the data using ols. We also fit a model to the early data using ols. This can be done using the `lmb` function with no prior specified.
+
+
+```{r}
+bench <- lmb(height ~ age + I(age^2), data=this)
+early <- lmb(height ~ age + I(age^2), data=this.early)
+```
+
+We can now compare the predictions from the different models.
+
+```{r}
+this <- this |> add_pred(bench, "bench")
+this <- this |> add_pred(early, "early")
+this <- this |> add_pred(lmb1, "lmb1")
+this <- this |> add_pred(lmb2, "lmb2")
+```
+
+
+```{r}
+this.long <- this |> pivot_longer(-c(gender, age, subject, height))
+this.long |> ggplot(aes(x=age)) +
+    geom_vline(xintercept = tt) + 
+    geom_point(aes(y=height)) +
+    geom_line(aes(y = value, color = name, linetype = name), linewidth = 1) 
+```
+
+
+
+
+
+
+# Insights and Interpretation
+
+- The **prior** is estimated from training children.
+- The **Bayesian prediction** (blue) shrinks the early OLS estimate toward the prior.
+- The **strength of the prior** ($\alpha$) controls how much the posterior follows the prior.
+- When early data is sparse, shrinkage improves stability.
+
+# Optional: Vary the Prior Strength
+
+Try different values of $\alpha$ to see how the posterior changes:
+
+```{r}
+# Try alpha = 0.3, 0.6, 0.9 for exploration
+```
+
+---
+
+This tutorial gives a simple but powerful demonstration of empirical Bayes for time-series regression in a pedagogically transparent way.
