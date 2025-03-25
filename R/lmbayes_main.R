@@ -27,53 +27,143 @@
 ##' }
 
 #' @export
-lmb <- function(formula., data., prior, update.sd=TRUE){
+lm2prior <- function(lm1, scale=1){
+    prior <- list(m=coef(lm1), C=diag(diag(vcov(lm1))) * scale, sd=sigma(lm1)*scale)
+    prior
+}
 
-    m  <- prior$m
-    C  <- prior$C
-    sd <- prior$sd 
 
-    cl <- match.call()
-    mf <- model.frame(formula., data=data.)
-    X = model.matrix(mf, data=data.)
+#' Linear Model with Empirical Bayes Shrinkage
+#'
+#' Fits a linear regression model with optional shrinkage toward a prior mean, using empirical Bayes logic.
+#' If no prior is provided, the function defaults to standard OLS via \code{lm()}.
+#'
+#' @param formula. A formula specifying the linear model (e.g., \code{y ~ x + I(x^2)}).
+#' @param data. A data frame containing the variables in the model.
+#' @param prior A list containing prior information with components:
+#'   \describe{
+#'     \item{\code{m}}{Numeric vector of prior means for the regression coefficients.}
+#'     \item{\code{C}}{Prior covariance matrix (not currently used in simple shrinkage).}
+#'     \item{\code{sd}}{(Optional) Prior residual standard deviation (can be used for scaling/shrinkage).}
+#'   }
+#'   If \code{prior} is \code{NULL}, the function fits a standard OLS model.
+#' @param alpha A numeric value in \code{[0, 1]} controlling shrinkage:
+#'   \describe{
+#'     \item{\code{alpha = 0}}{Full reliance on data (pure OLS).}
+#'     \item{\code{alpha = 1}}{Full reliance on prior (ignore data).}
+#'     \item{\code{0 < alpha < 1}}{Convex combination of prior mean and OLS estimate.}
+#'   }
+#' @param update.sd Logical. If \code{TRUE}, estimate the residual standard deviation from the data.
+#'
+#' @return An object of class \code{\"lmb_class\"}, which is a list with the following components:
+#' \describe{
+#'   \item{\code{call}}{The matched function call.}
+#'   \item{\code{formula}}{The model formula used.}
+#'   \item{\code{prior}}{The prior provided (or \code{NULL} if none).}
+#'   \item{\code{posterior}}{A list with posterior components:}
+#'     \describe{
+#'       \item{\code{m}}{Posterior mean vector of regression coefficients.}
+#'       \item{\code{C}}{Posterior covariance matrix (may be placeholder if not computed).}
+#'       \item{\code{sd}}{Posterior residual standard deviation (from OLS if \code{update.sd = TRUE}).}
+#'     }
+#'   \item{\code{X}}{The design matrix used in the model.}
+#'   \item{\code{data}}{The data used to fit the model.}
+#' }
+#'
+#' @examples
+#' ## Example: Bayesian shrinkage using the built-in 'cars' dataset
+#' data(cars)
+#' 
+#' # A pretend prior: intercept = 0, slope = 3, with some vague prior sd
+#' prior <- list(
+#'  m = c(0, 3),              # prior mean: intercept = 0, slope = 3
+#'  C = diag(c(100, 10)),     # vague prior covariance (not used in this shrinkage)
+#'  sd = 15                   # prior residual sd (not used here)
+#')
+#'
+#' # Fit Bayesian linear model with shrinkage (alpha = 0.4)
+#'
+#' # OLS
+#' fit0 <- lmb(dist ~ speed, data = cars)
+#'
+#' # Bayesian
+#' fit1 <- lmb(dist ~ speed, data = cars, prior = prior)
+#'
+#' # Shrinkage combination of prior and OLS
+#' fit2 <- lmb(dist ~ speed, data = cars, prior = prior, alpha = 0.4)
+#'
+#' # Posterior coefficients
+#' fit0$posterior ## Nothing
+#' fit1$posterior
+#' fit2$posterior
 
-    dummy <- lm(update(formula., ~1), data=data.)
-    yy <- unname(fitted(dummy) + resid(dummy))
+#' @export
+lmb <- function(formula., data., prior=NULL, alpha=0, update.sd=TRUE){
 
-    if (any(is.na(yy))) stop("missing values in response\n")
-
-    if (!is.matrix(C))
-        if (length(C) == 1) C <- diag(C, length(m))
-
-    if (is.numeric(sd) && length(sd)==1)
-        W <- diag(sd^2, length(yy))
-    else
-        stop("sd is not a number")
-        
-    Cyy = X %*% C %*% t(X) + W
-    Cyb <- X %*% C 
-    Cby <- t(Cyb)
+    cl  <- match.call()
+    mf  <- model.frame(formula., data=data.)
+    X   <- model.matrix(mf, data=data.)
+    nms <- colnames(X) 
+    ols <- lm(formula., data=data.)
+    sd.ols   <- sigma(ols)
+    beta.ols <- coef(ols)
     
-    Ey <- as.numeric(X %*% m)
-    
-    m2 <- m + Cby %*% solve(Cyy, (yy - Ey))
-    C2 <- C - Cby %*% solve(Cyy, Cyb)
-
-
-    if (update.sd){
-        yy <- data.[[deparse(formula.[[2]])]]
-        X <- model.matrix(formula., data=data.)
-        pp <- as.numeric(X %*% m2)
-        rr <- yy - pp
-        sd2 <- sd(rr)
-    } else {
-        sd2 <- sd
+    if (is.null(prior)) {
+        ## message("No prior supplied — fitting OLS model via lm().")
+        return(ols)
     }
+    
+    if (alpha > 0) {
+        m  <- prior$m
+        m2 <- alpha * m + (1-alpha) * beta.ols
+        C2 <- NULL
+        sd2 <- NULL
+    } else {            
+        m  <- prior$m
+        C  <- prior$C 
+        sd <- prior$sd 
+
+        yy <- response(ols)
+        if (any(is.na(yy)))
+            stop("missing values in response\n")
+        
+        if (!is.matrix(C)) {
+            if (length(C) == 1) {
+                C <- diag(C, length(m))            
+            }
+        }
+        
+        if (update.sd){
+            R <- diag(sd.ols^2, length(yy))
+        } else {
+            R <- diag(sd^2, length(yy))
+        }
+        
+        XCXt <- X %*% C %*% t(X)
+        Cyy <- XCXt + R
+        Cyb <- X %*% C 
+        Cby <- t(Cyb)    
+        Ey  <- as.numeric(X %*% m)    
+        m2  <- m + Cby %*% solve(Cyy, (yy - Ey)) ## posterior
+        C2  <- C - Cby %*% solve(Cyy, Cyb)       ## posterior
+        m2  <- as.numeric(m2)
+        names(m2) <- nms
+        
+        if (update.sd){
+            X  <- model.matrix(ols)
+            pp <- as.numeric(X %*% m2)
+            rr <- yy - pp
+            sd2 <- sd(rr)
+        } else {
+            sd2 <- sd
+        }
+    }
+    
     out <- list(call=cl, formula=formula.,
-                prior     = list(m=m,   C=C,   sd=sd),
+                prior     = prior,
                 posterior = list(m=m2,  C=C2,  sd=sd2),
                 X=X, data=data.)
-
+    
     class(out) <- "lmb_class"
     out
 }
@@ -88,6 +178,13 @@ as_lm <- function(object){
     out <- lm(object$formula, object$data)
     return(out)
 }
+
+
+
+    ## if (is.numeric(sd) && length(sd)==1)
+        
+    ## else
+    ##     stop("sd is not a number")
 
 #' 
 #' @importFrom stats "coef" "fitted" "formula" "lm" "model.frame" sigma simulate predict
